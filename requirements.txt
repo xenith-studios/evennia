@@ -8,6 +8,7 @@ django-sekizai
 inflect
 autobahn >= 17.9.3
 model_mommy
+python-dateutil
 
 # testing and development
 mock >= 1.0.1
