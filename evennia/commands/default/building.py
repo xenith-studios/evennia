@@ -1,6 +1,7 @@
 """
 Building and world design commands
 """
+import logging
 import re
 from django.conf import settings
 from django.db.models import Q, Min, Max
@@ -64,6 +65,9 @@ EXIT_TYPECLASS = settings.BASE_EXIT_TYPECLASS
 _DEFAULT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
 
 _PROTOTYPE_PARENTS = None
+
+
+logger = logging.getLogger(__name__)
 
 
 class ObjManipCommand(COMMAND_DEFAULT_CLASS):
@@ -266,11 +270,21 @@ class CmdCopy(ObjManipCommand):
     locks = "cmd:perm(copy) or perm(Builder)"
     help_category = "Building"
 
+    def check_target_location(self, target_location):
+        """
+        Check from object to make sure that it is alright to copy.
+
+        Used for overriding in subclassed commands, and is responsible for displaying
+        its own error messages.
+        """
+        return True
+
     def func(self):
         """Uses ObjManipCommand.parse()"""
 
         caller = self.caller
         args = self.args
+        self.copied_obj = None
         if not args:
             caller.msg(
                 "Usage: copy <obj> [=<new_name>[;alias;alias..]]"
@@ -286,10 +300,10 @@ class CmdCopy(ObjManipCommand):
                 return
             to_obj_name = "%s_copy" % from_obj_name
             to_obj_aliases = ["%s_copy" % alias for alias in from_obj.aliases.all()]
-            copiedobj = ObjectDB.objects.copy_object(
+            self.copied_obj = ObjectDB.objects.copy_object(
                 from_obj, new_key=to_obj_name, new_aliases=to_obj_aliases
             )
-            if copiedobj:
+            if self.copied_obj:
                 string = "Identical copy of %s, named '%s' was created." % (
                     from_obj_name,
                     to_obj_name,
@@ -309,16 +323,16 @@ class CmdCopy(ObjManipCommand):
                 to_obj_location = objdef["option"]
                 if to_obj_location:
                     to_obj_location = caller.search(to_obj_location, global_search=True)
-                    if not to_obj_location:
+                    if not to_obj_location or not self.check_target_location(to_obj_location):
                         return
 
-                copiedobj = ObjectDB.objects.copy_object(
+                self.copied_obj = ObjectDB.objects.copy_object(
                     from_obj,
                     new_key=to_obj_name,
                     new_location=to_obj_location,
                     new_aliases=to_obj_aliases,
                 )
-                if copiedobj:
+                if self.copied_obj:
                     string = "Copied %s to '%s' (aliases: %s)." % (
                         from_obj_name,
                         to_obj_name,
