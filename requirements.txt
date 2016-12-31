@@ -9,6 +9,8 @@ inflect
 autobahn >= 17.9.3
 model_mommy
 python-dateutil
+Jinja2 >= 2.11.1, < 2.12.0
+ddt
 
 # testing and development
 mock >= 1.0.1
