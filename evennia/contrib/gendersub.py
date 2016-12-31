@@ -41,12 +41,16 @@ default cmdset before it becomes available.
 
 import re
 from evennia.utils import logger
+
+from django.conf import settings
+
 from evennia import DefaultCharacter
 from evennia import Command
 
 # gender maps
+from evennia.utils import object_from_module
 
-_GENDER_PRONOUN_MAP = {
+GENDER_PRONOUN_MAP = {
     "male": {"s": "he", "o": "him", "p": "his", "a": "his"},
     "female": {"s": "she", "o": "her", "p": "her", "a": "hers"},
     "neutral": {"s": "it", "o": "it", "p": "its", "a": "its"},
@@ -55,8 +59,6 @@ _GENDER_PRONOUN_MAP = {
 _RE_GENDER_PRONOUN = re.compile(r"(?<!\|)\|(?!\|)[sSoOpPaA]")
 
 # in-game command for setting the gender
-
-
 class SetGender(Command):
     """
     Sets gender on yourself
@@ -83,9 +85,48 @@ class SetGender(Command):
         caller.msg("Your gender was set to %s." % arg)
 
 
+def gender_map_generator(target):
+    """
+    This function can be overwritten if you store gender on a different prop
+    or need to customize genders in some manner.
+    """
+    gender = target.attributes.get("gender", default="neutral").lower()
+    gender = gender if gender in GENDER_PRONOUN_MAP else "neutral"
+    return gender, GENDER_PRONOUN_MAP
+
+
+def get_pronoun(target):
+    def wrapped(regex_match):
+        """
+        Get pronoun from the pronoun marker in the text. This is used as
+        the callable for the re.sub function.
+
+        Args:
+            target (Character): A character to find the gender for.
+            regex_match (MatchObject): the regular expression match.
+
+        Notes:
+            - `|s`, `|S`: Subjective form: he, she, it, He, She, It, They
+            - `|o`, `|O`: Objective form: him, her, it, Him, Her, It, Them
+            - `|p`, `|P`: Possessive form: his, her, its, His, Her, Its, Their
+            - `|a`, `|A`: Absolute Possessive form: his, hers, its, His, Hers, Its, Theirs
+
+        """
+        typ = regex_match.group()[1]  # "s", "O" etc
+        if hasattr(settings, 'GENDER_MAP_GENERATOR'):
+            gender, gender_map = object_from_module(settings.GENDER_MAP_GENERATOR)(target)
+        else:
+            gender, gender_map = gender_map_generator(target)
+        pronoun = gender_map[gender][typ.lower()]
+        return pronoun.capitalize() if typ.isupper() else pronoun
+    return wrapped
+
+
+def gender_sub(target, text):
+    return _RE_GENDER_PRONOUN.sub(get_pronoun(target), text)
+
+
 # Gender-aware character class
-
-
 class GenderCharacter(DefaultCharacter):
     """
     This is a Character class aware of gender.
@@ -98,27 +139,6 @@ class GenderCharacter(DefaultCharacter):
         """
         super().at_object_creation()
         self.db.gender = "ambiguous"
-
-    def _get_pronoun(self, regex_match):
-        """
-        Get pronoun from the pronoun marker in the text. This is used as
-        the callable for the re.sub function.
-
-        Args:
-            regex_match (MatchObject): the regular expression match.
-
-        Notes:
-            - `|s`, `|S`: Subjective form: he, she, it, He, She, It, They
-            - `|o`, `|O`: Objective form: him, her, it, Him, Her, It, Them
-            - `|p`, `|P`: Possessive form: his, her, its, His, Her, Its, Their
-            - `|a`, `|A`: Absolute Possessive form: his, hers, its, His, Hers, Its, Theirs
-
-        """
-        typ = regex_match.group()[1]  # "s", "O" etc
-        gender = self.attributes.get("gender", default="ambiguous")
-        gender = gender if gender in ("male", "female", "neutral") else "ambiguous"
-        pronoun = _GENDER_PRONOUN_MAP[gender][typ.lower()]
-        return pronoun.capitalize() if typ.isupper() else pronoun
 
     def msg(self, text, from_obj=None, session=None, **kwargs):
         """
@@ -141,11 +161,10 @@ class GenderCharacter(DefaultCharacter):
             All extra kwargs will be passed on to the protocol.
 
         """
+        # pre-process the text before continuing
+
         try:
-            if text and isinstance(text, tuple):
-                text = (self._RE_GENDER_PRONOUN.sub(self._get_pronoun, text[0]), *text[1:])
-            else:
-                text = self._RE_GENDER_PRONOUN.sub(self._get_pronoun, text)
+            text = gender_sub(self, text)
         except TypeError:
             pass
         except Exception as e:

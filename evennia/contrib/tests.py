@@ -9,6 +9,7 @@ import datetime
 from django.test import override_settings
 from evennia.commands.default.tests import CommandTest
 from evennia.utils.test_resources import EvenniaTest, mockdelay, mockdeferLater
+from evennia.contrib.gendersub import get_pronoun
 from mock import Mock, patch
 
 # Testing of rplanguage module
@@ -901,7 +902,7 @@ class TestGenderSub(CommandTest):
         char = create_object(gendersub.GenderCharacter, key="Gendered", location=self.room1)
         txt = "Test |p gender"
         self.assertEqual(
-            gendersub._RE_GENDER_PRONOUN.sub(char._get_pronoun, txt), "Test their gender"
+            gendersub._RE_GENDER_PRONOUN.sub(get_pronoun(char), txt), "Test their gender"
         )
 
 
