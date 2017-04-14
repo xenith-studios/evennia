@@ -416,7 +416,7 @@ class CmdGet(COMMAND_DEFAULT_CLASS):
             caller.msg("You can't get yourself.")
             return
         if not obj.access(caller, 'get'):
-            self.failure_message(caller, obj)
+            self.failure_message(obj)
             return
 
         # calling at_before_get hook method
@@ -424,7 +424,7 @@ class CmdGet(COMMAND_DEFAULT_CLASS):
             return
 
         obj.move_to(caller, quiet=True)
-        self.success_message(caller, obj)
+        self.success_message(obj)
         # calling hook method
         obj.at_get(caller)
 
@@ -481,7 +481,7 @@ class CmdDrop(COMMAND_DEFAULT_CLASS):
             return
 
         obj.move_to(caller.location, quiet=True)
-        self.success_message(obj)
+        self.drop_message(obj)
         # Call the object script's at_drop() method.
         obj.at_drop(caller)
 

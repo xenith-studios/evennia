@@ -36,7 +36,7 @@ __all__ = (
     "search_message",
     "search_channel",
     "search_help_entry",
-    "search_object_tag",
+    "search_object_by_tag",
     "search_script_tag",
     "search_account_tag",
     "search_channel_tag",
@@ -234,7 +234,7 @@ search_attribute_object = ObjectDB.objects.get_attribute
 
 # Locate Tags
 
-#    search_object_tag(key=None, category=None) (also search_tag works)
+#    search_object_by_tag(key=None, category=None) (also search_tag works)
 #    search_account_tag(key=None, category=None)
 #    search_script_tag(key=None, category=None)
 #    search_channel_tag(key=None, category=None)
