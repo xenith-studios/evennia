@@ -60,7 +60,7 @@ See the `spawn` command and `evennia.prototypes.spawner.spawn` for more info.
 # "resists": ["cold", "poison"],
 # "attacks": ["fists"],
 # "weaknesses": ["fire", "light"],
-# "tags": = [("greenskin", "monster"), ("humanoid", "monster")]
+# "tags": [("greenskin", "monster"), ("humanoid", "monster")]
 # }
 #
 # GOBLIN_WIZARD = {
