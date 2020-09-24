@@ -2303,7 +2303,7 @@ class DefaultRoom(DefaultObject):
             if not locks and account:
                 locks = cls.lockstring.format(**{"id": account.id})
             elif not locks and not account:
-                locks = cls.lockstring(**{"id": obj.id})
+                locks = cls.lockstring.format(**{"id": obj.id})
 
             obj.locks.add(locks)
 
