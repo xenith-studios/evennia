@@ -2590,6 +2590,22 @@ class DefaultExit(DefaultObject):
                 overriding the call (unused by default).
 
         """
+
+        # If the exit was created with a 'lazy resolve' option and nonexistant
+        # destination (such as spawning from a batchscript without using dig or
+        # tunnel), attempt to resolve it now.  Allows chunks of interconnected
+        # rooms to be built.
+        if self.attributes.has('lazy_resolve_dest'):
+            dest_name = self.attributes.get('lazy_resolve_dest')
+            new_dest = self.search(dest_name, typeclass=DefaultRoom, exact=True)
+
+            if len(new_dest) == 1:
+                self.destination = new_dest[0]
+                self.attributes.remove('lazy_resolve_dest')
+                target_location = self.destination
+            elif len(new_dest) > 1:
+                raise ValueError("ambiguous lazy_resolve destination: " + dest_name)
+
         source_location = traversing_object.location
         if traversing_object.move_to(target_location):
             self.at_after_traverse(traversing_object, source_location)

@@ -1422,6 +1422,7 @@ class CmdOpen(ObjManipCommand):
 
     key = "open"
     locks = "cmd:perm(open) or perm(Builder)"
+    switch_options = ['lazy']
     help_category = "Building"
 
     new_obj_lockstring = "control:id({id}) or perm(Admin);delete:id({id}) or perm(Admin)"
@@ -1531,13 +1532,23 @@ class CmdOpen(ObjManipCommand):
         # first, check so the destination exists.
         destination = caller.search(dest_name, global_search=True)
         if not destination:
-            return
+            if 'lazy' in self.switches:
+                destination = search.object_search("Limbo")[0]
+                resolve_later = True
+            else:
+                return
+        else:
+            resolve_later = False
 
         # Create exit
-        ok = self.create_exit(exit_name, location, destination, exit_aliases, exit_typeclass)
-        if not ok:
+        exitobj = self.create_exit(exit_name, location, destination, exit_aliases, exit_typeclass)
+        if not exitobj:
             # an error; the exit was not created, so we quit.
             return
+
+        if resolve_later:
+            exitobj.attributes.add('lazy_resolve_dest', dest_name)
+
         # Create back exit, if any
         if len(self.lhs_objs) > 1:
             back_exit_name = self.lhs_objs[1]["name"]
