@@ -890,14 +890,29 @@ class CmdDig(ObjManipCommand):
         location = caller.location
 
         # Create the new room
-        typeclass = room["option"]
-        if not typeclass:
-            typeclass = settings.BASE_ROOM_TYPECLASS
+        # If an option was supplied, try to interpret it as a prototype.  Failing that,
+        # try to interpret as a typeclass
+        new_room = None
 
-        # create room
-        new_room = create.create_object(
-            typeclass, room["name"], aliases=room["aliases"], report_to=caller
-        )
+        if room["option"]:
+            prototype = _get_prototype(self.caller, room["option"])
+            typeclass = prototype["typeclass"]
+
+            try:
+                for new_room in spawner.spawn(prototype):
+                    self.caller.msg("Spawned %s." % new_room.get_display_name(self.caller))
+            except RuntimeError as err:
+                caller.msg(err)
+                new_room = None
+
+        if not new_room:
+            typeclass = room["option"] or settings.BASE_ROOM_TYPECLASS
+
+            # create room
+            new_room = create.create_object(
+                typeclass, room["name"], aliases=room["aliases"], report_to=caller
+            )
+
         lockstring = self.new_room_lockstring.format(id=caller.id)
         new_room.locks.add(lockstring)
         alias_string = ""
@@ -3275,6 +3290,116 @@ class CmdTag(COMMAND_DEFAULT_CLASS):
 
 # helper functions for spawn
 
+def _parse_prototype(caller, inp, expect=dict):
+    """
+    Parse a prototype dict or key from the input and convert it safely
+    into a dict if appropriate.
+
+    Args:
+        inp (str): The input from user.
+        caller (Object): The game object calling the command.
+        expect (type, optional):
+    Returns:
+        prototype (dict, str or None): The parsed prototype. If None, the error
+            was already reported.
+
+    """
+    eval_err = None
+    try:
+        prototype = _LITERAL_EVAL(inp)
+    except (SyntaxError, ValueError) as err:
+        # treat as string
+        eval_err = err
+        prototype = utils.to_str(inp)
+    finally:
+        # it's possible that the input was a prototype-key, in which case
+        # it's okay for the LITERAL_EVAL to fail. Only if the result does not
+        # match the expected type do we have a problem.
+        if not isinstance(prototype, expect):
+            if eval_err:
+                string = (
+                    f"{inp}\n{eval_err}\n|RCritical Python syntax error in argument. Only primitive "
+                    "Python structures are allowed. \nMake sure to use correct "
+                    "Python syntax. Remember especially to put quotes around all "
+                    "strings inside lists and dicts.|n For more advanced uses, embed "
+                    "inlinefuncs in the strings."
+                )
+            else:
+                string = "Expected {}, got {}.".format(expect, type(prototype))
+            caller.msg(string)
+            return
+
+    if expect == dict:
+        # an actual prototype. We need to make sure it's safe,
+        # so don't allow exec.
+        # TODO: Exec support is deprecated. Remove completely for 1.0.
+        if "exec" in prototype and not caller.check_permstring("Developer"):
+            caller.msg(
+                "Spawn aborted: You are not allowed to " "use the 'exec' prototype key."
+            )
+            return
+        try:
+            # we homogenize the protoype first, to be more lenient with free-form
+            protlib.validate_prototype(protlib.homogenize_prototype(prototype))
+        except RuntimeError as err:
+            caller.msg(str(err))
+            return
+    return prototype
+
+def _search_prototype(caller, prototype_key, quiet=False):
+    """
+    Search for prototype and handle no/multi-match and access.
+
+    Returns a single found prototype or None - in the
+    case, the caller has already been informed of the
+    search error we need not do any further action.
+
+    """
+    prototypes = protlib.search_prototype(prototype_key)
+    nprots = len(prototypes)
+
+    # handle the search result
+    err = None
+    if not prototypes:
+        err = f"No prototype named '{prototype_key}' was found."
+    elif nprots > 1:
+        err = "Found {} prototypes matching '{}':\n  {}".format(
+            nprots,
+            prototype_key,
+            ", ".join(proto.get("prototype_key", "") for proto in prototypes),
+        )
+    else:
+        # we have a single prototype, check access
+        prototype = prototypes[0]
+        if not caller.locks.check_lockstring(
+            caller, prototype.get("prototype_locks", ""), access_type="spawn", default=True
+        ):
+            err = "You don't have access to use this prototype."
+
+    if err:
+        # return None on any error
+        if not quiet:
+            caller.msg(err)
+        return
+    return prototype
+
+def _get_prototype(caller, argstring):
+    prototype = _parse_prototype(
+        caller, argstring, expect=dict if argstring.strip().startswith("{") else str
+    )
+    if not prototype:
+        # this will only let through dicts or strings
+        return None
+
+    if isinstance(prototype, str):
+        # A prototype key we are looking to apply
+        prototype_key = prototype
+        prototype = _search_prototype(caller, prototype_key)
+
+        if not prototype:
+            return None
+
+    return prototype
 
 class CmdSpawn(COMMAND_DEFAULT_CLASS):
     """
@@ -3361,98 +3486,6 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
     locks = "cmd:perm(spawn) or perm(Builder)"
     help_category = "Building"
 
-    def _search_prototype(self, prototype_key, quiet=False):
-        """
-        Search for prototype and handle no/multi-match and access.
-
-        Returns a single found prototype or None - in the
-        case, the caller has already been informed of the
-        search error we need not do any further action.
-
-        """
-        prototypes = protlib.search_prototype(prototype_key)
-        nprots = len(prototypes)
-
-        # handle the search result
-        err = None
-        if not prototypes:
-            err = f"No prototype named '{prototype_key}' was found."
-        elif nprots > 1:
-            err = "Found {} prototypes matching '{}':\n  {}".format(
-                nprots,
-                prototype_key,
-                ", ".join(proto.get("prototype_key", "") for proto in prototypes),
-            )
-        else:
-            # we have a single prototype, check access
-            prototype = prototypes[0]
-            if not self.caller.locks.check_lockstring(
-                self.caller, prototype.get("prototype_locks", ""), access_type="spawn", default=True
-            ):
-                err = "You don't have access to use this prototype."
-
-        if err:
-            # return None on any error
-            if not quiet:
-                self.caller.msg(err)
-            return
-        return prototype
-
-    def _parse_prototype(self, inp, expect=dict):
-        """
-        Parse a prototype dict or key from the input and convert it safely
-        into a dict if appropriate.
-
-        Args:
-            inp (str): The input from user.
-            expect (type, optional):
-        Returns:
-            prototype (dict, str or None): The parsed prototype. If None, the error
-                was already reported.
-
-        """
-        eval_err = None
-        try:
-            prototype = _LITERAL_EVAL(inp)
-        except (SyntaxError, ValueError) as err:
-            # treat as string
-            eval_err = err
-            prototype = utils.to_str(inp)
-        finally:
-            # it's possible that the input was a prototype-key, in which case
-            # it's okay for the LITERAL_EVAL to fail. Only if the result does not
-            # match the expected type do we have a problem.
-            if not isinstance(prototype, expect):
-                if eval_err:
-                    string = (
-                        f"{inp}\n{eval_err}\n|RCritical Python syntax error in argument. Only primitive "
-                        "Python structures are allowed. \nMake sure to use correct "
-                        "Python syntax. Remember especially to put quotes around all "
-                        "strings inside lists and dicts.|n For more advanced uses, embed "
-                        "inlinefuncs in the strings."
-                    )
-                else:
-                    string = "Expected {}, got {}.".format(expect, type(prototype))
-                self.caller.msg(string)
-                return
-
-        if expect == dict:
-            # an actual prototype. We need to make sure it's safe,
-            # so don't allow exec.
-            # TODO: Exec support is deprecated. Remove completely for 1.0.
-            if "exec" in prototype and not self.caller.check_permstring("Developer"):
-                self.caller.msg(
-                    "Spawn aborted: You are not allowed to " "use the 'exec' prototype key."
-                )
-                return
-            try:
-                # we homogenize the protoype first, to be more lenient with free-form
-                protlib.validate_prototype(protlib.homogenize_prototype(prototype))
-            except RuntimeError as err:
-                self.caller.msg(str(err))
-                return
-        return prototype
-
     def _get_prototype_detail(self, query=None, prototypes=None):
         """
         Display the detailed specs of one or more prototypes.
@@ -3499,7 +3532,7 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
             n_updated (int): Number of updated objects.
 
         """
-        prototype = self._search_prototype(prototype_key)
+        prototype = _search_prototype(self.caller, prototype_key)
         if not prototype:
             return
 
@@ -3567,7 +3600,7 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
             prototype = None
             if self.lhs:
                 prototype_key = self.lhs
-                prototype = self._search_prototype(prototype_key)
+                prototype = _search_prototype(self.caller, prototype_key)
                 if not prototype:
                     return
             olc_menus.start_olc(caller, session=self.session, prototype=prototype)
@@ -3590,7 +3623,7 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
             # query for key match and return the prototype as a safe one-liner string.
             if not self.args:
                 caller.msg("You need to specify a prototype-key to get the raw data for.")
-            prototype = self._search_prototype(self.args)
+            prototype = _search_prototype(self.caller, self.args)
             if not prototype:
                 return
             caller.msg(str(prototype))
@@ -3641,7 +3674,7 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
                 prototype_input = self.lhs.strip()
 
             # handle parsing
-            prototype = self._parse_prototype(prototype_input)
+            prototype = _parse_prototype(self.caller, prototype_input)
             if not prototype:
                 return
 
@@ -3670,7 +3703,7 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
 
             string = ""
             # check for existing prototype (exact match)
-            old_prototype = self._search_prototype(prototype_key, quiet=True)
+            old_prototype = _search_prototype(self.caller, prototype_key, quiet=True)
 
             diff = spawner.prototype_diff(old_prototype, prototype, homogenize=True)
             diffstr = spawner.format_diff(diff)
@@ -3758,22 +3791,10 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
 
         # If we get to this point, we use not switches but are trying a
         # direct creation of an object from a given prototype or -key
+        prototype = _get_prototype(self.caller, self.args)
 
-        prototype = self._parse_prototype(
-            self.args, expect=dict if self.args.strip().startswith("{") else str
-        )
         if not prototype:
-            # this will only let through dicts or strings
             return
-
-        key = "<unnamed>"
-        if isinstance(prototype, str):
-            # A prototype key we are looking to apply
-            prototype_key = prototype
-            prototype = self._search_prototype(prototype_key)
-
-            if not prototype:
-                return
 
         # proceed to spawning
         try:
